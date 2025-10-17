@@ -1,141 +1,129 @@
+/*
+ * Author: Joel Chacón Castillo
+ * Description: Eulerian traversal + alternate edge coloring solution
+ * 
+ * This program finds an Eulerian traversal through a possibly disconnected graph.
+ * It adds an auxiliary node S to connect components and handle odd-degree vertices,
+ * ensuring every vertex has even degree. Then it performs Hierholzer's algorithm 
+ * using an edge-indexed approach for O(E) complexity.
+ */
+
 #include <bits/stdc++.h>
 using namespace std;
+using ll = long long;
 
-int n, m;
-
-// Compute total score
-pair<long long, string> compute_score(const vector<int> &color, const vector<vector<int>> &nodes) {
-    vector<unordered_map<int, int>> days(2);
-    string path;
-    for (int i = 0; i < m; i++) {
-        path += (color[i] == 0 ? '1' : '2');
-        days[color[i]][nodes[i][0]]++;
-        days[color[i]][nodes[i][1]]++;
-    }
-    long long score = 0;
-    for (auto &maps : days)
-        for (auto &[coder, count] : maps)
-            score += 1LL * count * count;
-    return {score, path};
-}
-
-struct ComponentInfo {
-    int a = 0; // count of color 0
-    int b = 0; // count of color 1
-    vector<int> nodes; // indices
-};
-
-// DP memo key: (idx, delta)
-struct Key {
-    int idx;
-    int delta;
-    bool operator==(const Key &o) const noexcept {
-        return idx == o.idx && delta == o.delta;
+struct DSU {
+    vector<int> p, sz;
+    DSU(int n): p(n), sz(n,1) { iota(p.begin(), p.end(), 0); }
+    int find(int x){ return p[x]==x?x:p[x]=find(p[x]); }
+    void unite(int a,int b){
+        a=find(a); b=find(b);
+        if(a==b) return;
+        if(sz[a]<sz[b]) swap(a,b);
+        p[b]=a; sz[a]+=sz[b];
     }
 };
 
-struct KeyHash {
-    size_t operator()(const Key &k) const noexcept {
-        return hash<long long>()(((long long)k.idx << 32) ^ (k.delta + 50000));
-    }
-};
+void solve(){
+    int T; 
+    if(!(cin>>T)) return;
+    for(int tc=1; tc<=T; ++tc){
+        int n,m; 
+        cin>>n>>m;
+        vector<int> A(m),B(m);
+        for(int i=0;i<m;i++){ cin>>A[i]>>B[i]; --A[i]; --B[i]; }
 
-unordered_map<Key, long long, KeyHash> memo;
-unordered_map<Key, bool, KeyHash> choice;
+        DSU dsu(n);
+        vector<int> deg(n);
+        for(int i=0;i<m;i++){ 
+            deg[A[i]]++; 
+            deg[B[i]]++; 
+            dsu.unite(A[i],B[i]); 
+        }
 
-long long dfsDP(int idx, int delta, const vector<ComponentInfo> &comps) {
-    if (idx == (int)comps.size())
-        return llabs(delta);
+        int S = n; // extra node
+        vector<vector<int>> adj(n+1);
+        vector<int> eu, ev, rid;
 
-    Key key{idx, delta};
-    if (memo.count(key)) return memo[key];
+        auto add_edge = [&](int u,int v,int id){
+            int idx = eu.size();
+            eu.push_back(u); 
+            ev.push_back(v); 
+            rid.push_back(id);
+            adj[u].push_back(idx); 
+            adj[v].push_back(idx);
+        };
 
-    auto [a, b, _] = comps[idx];
-    long long keep = dfsDP(idx + 1, delta + (a - b), comps);
-    long long flip = dfsDP(idx + 1, delta + (b - a), comps);
+        // original edges
+        for(int i=0;i<m;i++) add_edge(A[i],B[i],i);
+        // connect odd-degree vertices to S
+        for(int v=0;v<n;v++) if(deg[v]&1) add_edge(v,S,-1);
 
-    bool takeFlip = flip < keep;
-    choice[key] = takeFlip;
-    return memo[key] = min(keep, flip);
-}
+        // ensure each component is connected to S evenly
+        vector<int> rep(n,-1), hasEdge(n,0), hasOdd(n,0);
+        for(int v=0;v<n;v++) if(deg[v]>0){
+            int r=dsu.find(v);
+            hasEdge[r]=1;
+            if(rep[r]==-1) rep[r]=v;
+            if(deg[v]&1) hasOdd[r]=1;
+        }
+        for(int r=0;r<n;r++) if(hasEdge[r]&&!hasOdd[r]){
+            int v=rep[r];
+            add_edge(v,S,-1);
+            add_edge(v,S,-1);
+        }
 
-// reconstruct flip choices
-void reconstruct(int idx, int delta, const vector<ComponentInfo> &comps, vector<int> &color) {
-    if (idx == (int)comps.size()) return;
-    Key key{idx, delta};
-    bool flip = choice[key];
-    if (flip) {
-        for (int node : comps[idx].nodes) color[node] ^= 1;
-        reconstruct(idx + 1, delta + (comps[idx].b - comps[idx].a), comps, color);
-    } else {
-        reconstruct(idx + 1, delta + (comps[idx].a - comps[idx].b), comps, color);
-    }
-}
-
-void solve() {
-    cin >> n >> m;
-    vector<vector<int>> nodes(m, vector<int>(2));
-    vector<vector<int>> coder2node(n + 1);
-
-    for (int i = 0; i < m; i++) {
-        cin >> nodes[i][0] >> nodes[i][1];
-        coder2node[nodes[i][0]].push_back(i);
-        coder2node[nodes[i][1]].push_back(i);
-    }
-
-    vector<int> color(m, -1);
-    queue<int> q;
-    vector<ComponentInfo> comps;
-
-    for (int i = 0; i < m; i++) {
-        if (color[i] != -1) continue;
-
-        color[i] = 0;
-        q.push(i);
-        vector<bool> markedCoder(n + 1, false);
-        ComponentInfo comp;
-
-        while (!q.empty()) {
-            int node = q.front(); q.pop();
-            comp.nodes.push_back(node);
-            if (color[node] == 0) comp.a++;
-            else comp.b++;
-
-            int c1 = nodes[node][0], c2 = nodes[node][1];
-            for (int coder : {c1, c2}) {
-                if (markedCoder[coder]) continue;
-                for (int next : coder2node[coder]) {
-                    if (next == node) continue;
-                    if (color[next] == -1) {
-                        color[next] = color[node] ^ 1;
-                        q.push(next);
-                    }
+        // Eulerian traversal
+        int E=eu.size();
+        vector<char> used(E);
+        vector<int> it(n+1), stV{S}, stE, res;
+        while(!stV.empty()){
+            int v=stV.back();
+            while(it[v]<adj[v].size() && used[adj[v][it[v]]]) it[v]++;
+            if(it[v]==adj[v].size()){
+                stV.pop_back();
+                if(!stE.empty()){ 
+                    res.push_back(stE.back()); 
+                    stE.pop_back(); 
                 }
-                markedCoder[coder] = true;
+            }else{
+                int ei=adj[v][it[v]++];
+                if(used[ei]) continue;
+                used[ei]=1;
+                int to=eu[ei]^ev[ei]^v;
+                stV.push_back(to);
+                stE.push_back(ei);
             }
         }
-        comps.push_back(comp);
+
+        // alternate coloring
+        vector<int> color(E);
+        for(int i=res.size()-1,cur=0;i>=0;i--,cur++)
+            color[res[i]] = (cur%2 ? 2 : 1);
+
+        // assign back to real edges
+        vector<int> day(m,1);
+        for(int i=0;i<E;i++) if(rid[i]>=0) day[rid[i]] = color[i];
+
+        // compute answer
+        vector<int> d1(n), d2(n);
+        for(int i=0;i<m;i++){
+            int u=A[i],v=B[i];
+            if(day[i]==1){ d1[u]++; d1[v]++; }
+            else{ d2[u]++; d2[v]++; }
+        }
+        ll ans=0;
+        for(int i=0;i<n;i++) ans += 1LL*d1[i]*d1[i] + 1LL*d2[i]*d2[i];
+
+        string s;
+        for(int i=0;i<m;i++) s.push_back('0'+day[i]);
+        cout<<"Case #"<<tc<<": "<<ans<<" "<<s<<"\n";
     }
-
-    memo.clear();
-    choice.clear();
-    dfsDP(0, 0, comps);
-
-    reconstruct(0, 0, comps, color);
-
-    auto [score, path] = compute_score(color, nodes);
-    cout << score << " " << path << "\n";
 }
 
-int main() {
+int main(){
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
-    int T; 
-    cin >> T;
-    for (int i = 1; i <= T; i++) {
-        cout << "Case #" << i << ": ";
-        solve();
-    }
-    return 0;
+    solve();
 }
 

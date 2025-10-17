@@ -23,6 +23,7 @@ void solve(){
 	for(auto i:indexes){
 		if(pos.count(B[i])==0){
 			cout << -1 <<endl;
+			return;
 		}else{
 			if(A[i]!=B[i]){
 				res.push_back({pos[B[i]]+1, i+1});
